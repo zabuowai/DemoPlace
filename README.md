@@ -37,8 +37,12 @@ see the architecture doc for the validation evidence.
 
 ## Requirements
 
-- A C++20 compiler with OpenMP support. Developed and tested with **g++ 15.2** on Ubuntu
-  25.10/26.04; anything g++ 11+ / clang 14+ with `-fopenmp` should work.
+- A C++20 compiler with OpenMP support. Developed with g++ 15.2 on Ubuntu 25.10/26.04;
+  also confirmed compiling clean — zero errors, zero warnings even under `-Wall -Wextra`,
+  and numerically identical test results — on **g++ 13.4.0** (Ubuntu's packaged 13.x;
+  the code has no dependency on anything introduced after GCC 13's language/library
+  feature set, so 13.2.0 specifically is expected to work equally well). Anything
+  g++ 11+ / clang 14+ with `-fopenmp` should work.
 - No other dependencies — no Boost, no CMake, no Python. (If you also want to compare
   against the *original* DREAMPlaceFPGA, that's a much heavier PyTorch/CMake/Boost stack;
   see `docs/ARCHITECTURE.md` for notes, it is not needed to build or run this port.)
