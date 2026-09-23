@@ -1,0 +1,35 @@
+# Build outputs
+/dpfpga
+/test_dct
+/test_assign
+/test_assignment
+/test_gradients
+/debug_dsp
+/profile_evaluate
+*.o
+*.obj
+
+# Run artifacts / experiment scratch
+/results/
+/results_*/
+run_log*.txt
+run_c*.txt
+c1_notime.txt
+c2_notime.txt
+*.gp.pl
+*.final.pl
+
+# Large bundled benchmarks not used by the documented example/tests (~230MB) — the
+# repo only tracks FPGA-example1 and its derived noDSPRAM variant. Delete this stanza
+# if you want to commit the rest too.
+/benchmarks/sample_ispd2016_benchmarks/FPGA-example2/
+/benchmarks/sample_ispd2016_benchmarks/FPGA-example3/
+/benchmarks/sample_ispd2016_benchmarks/FPGA-example4/
+/benchmarks/sample_ispd2016_benchmarks/FPGA01/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
