@@ -60,6 +60,49 @@ This produces a single `dpfpga` binary. There is no build system beyond this one
 command — `-march=native` and `-O3` matter for performance (the density model does a lot
 of DCT/FFT work per iteration), `-fopenmp` enables the multi-threaded hot loops.
 
+### Running the binary on a different (possibly older) machine
+
+By default `dpfpga` links `libstdc++`/`libgcc`/`libgomp` dynamically. That binary will
+only run on a machine whose runtime libraries are at least as new as the ones on the
+*build* machine — critically, this is governed by whatever `libstdc++.so.6` the linker
+finds on the build machine at link time, **not** by which `g++` version you invoked. A
+build done with an older `g++` (say, `g++-13`) on a system that also has a newer GCC
+installed will still link against that system's newer shared `libstdc++`, and the
+resulting binary will refuse to run elsewhere with an error like:
+
+```
+./dpfpga: /lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.32' not found
+```
+
+`-march=native` has the same kind of portability trap for a different reason: it bakes
+in the *build* machine's exact CPU instruction set, so the binary can also `SIGILL` on
+an older CPU. Drop it (or use `-march=x86-64-v2`/`-mtune=native`) if the build and target
+CPUs might differ.
+
+If you need to hand the binary to a machine you don't control, or one older than the
+build machine, statically link the C++ runtime instead:
+
+```bash
+g++ -std=c++20 -O3 -march=native -fopenmp -Wno-maybe-uninitialized \
+    -static-libgcc -static-libstdc++ \
+    -Iinclude apps/dreamplacefpga.cpp src/*.cpp -o dpfpga
+```
+
+or, to also stop depending on the target's `glibc`/`libgomp` versions (the more robust
+option — a `libstdc++`-only fix doesn't help if the target's C library is old too, and
+there's no networking/`dlopen` use in this codebase to make full static linking risky):
+
+```bash
+g++ -std=c++20 -O3 -march=native -fopenmp -Wno-maybe-uninitialized \
+    -static \
+    -Iinclude apps/dreamplacefpga.cpp src/*.cpp -o dpfpga
+```
+
+Both were verified against the tests and the bundled example with g++ 13.4.0: identical
+results to a normal dynamic build, `ldd` reports no dynamically-linked runtime libraries
+at all for the fully static one (you may see a harmless linker warning about `dlopen` in
+`libgomp`'s GPU-offload code path, which this project never exercises).
+
 ## Run the example (FPGA-example1)
 
 The repository bundles the ISPD'2016 `FPGA-example1` sample benchmark under
