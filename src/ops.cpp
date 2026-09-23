@@ -70,7 +70,14 @@ Real weighted_average_wirelength(const PlaceData& d, const Real* pin_pos, Real i
   if (grad_pin) std::fill(grad_pin, grad_pin + 2 * static_cast<size_t>(num_pins), Real(0));
   double total = 0;
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : total) schedule(dynamic, 64)
+  // schedule(runtime): the actual policy is chosen once per run in place_fpga() from
+  // deterministic_flag. Net cost varies a lot with pin count, so schedule(dynamic) balances
+  // load better than schedule(static) -- but which thread's partial sum a given net lands in
+  // then depends on runtime timing, and float addition isn't associative, so two runs of the
+  // identical config can differ by an ULP here and (in this chaotic optimizer) diverge
+  // completely after enough iterations. schedule(static) fixes the iteration-to-thread
+  // mapping regardless of timing, trading some load-balance for exact reproducibility.
+#pragma omp parallel for reduction(+ : total) schedule(runtime)
 #endif
   for (int n = 0; n < num_nets; ++n) {
     if (!d.net_mask[static_cast<size_t>(n)]) continue;

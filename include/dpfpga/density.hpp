@@ -57,6 +57,9 @@ class RegionDensity {
   std::vector<Real> auv_;                          ///< DCT of the density map
   std::vector<Real> field_x_, field_y_;
   bool fillers_in_map_ = true;
+  /// Per-thread scratch for accumulate()'s explicit (not omp-reduction-clause) parallel
+  /// combine -- see the comment there for why.
+  mutable std::vector<Real> thread_scratch_;
 };
 
 }  // namespace dpfpga

@@ -10,6 +10,17 @@ namespace fs = std::filesystem;
 
 static void place_fpga(const Params& params) {
   Stopwatch total;
+#ifdef _OPENMP
+  // Picks the policy for every schedule(runtime) loop (currently just
+  // weighted_average_wirelength's net loop). static: fixed, timing-independent
+  // iteration-to-thread mapping -> bit-reproducible runs. dynamic: better load balance
+  // across nets of very different pin counts, at the cost of run-to-run reproducibility.
+  if (params.deterministic_flag) {
+    omp_set_schedule(omp_sched_static, 0);
+  } else {
+    omp_set_schedule(omp_sched_dynamic, 64);
+  }
+#endif
   PlaceDB db;
   db.read(params);
   db.initialize(params);

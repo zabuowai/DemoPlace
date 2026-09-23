@@ -111,17 +111,37 @@ void RegionDensity::accumulate(const Real* pos, int begin, int end, Real stretch
   const Real target_half_x = Real(0.5) * stretch_ratio * bin_size_x_;
   const Real target_half_y = Real(0.5) * stretch_ratio * bin_size_y_;
   // Scatter-add: bins written by different i can overlap, so parallelizing needs a
-  // reduction rather than a plain parallel for. The reduction gives every thread a private
-  // copy of `map` (nbx_*nby_ reals), so it only pays off for the big filler-dominated calls
-  // (LUT/FF regions can have hundreds of thousands of ids); skip it for small ranges such as
-  // the movable-only pass in overflow(), where the reduction's own overhead would dominate.
+  // reduction rather than a plain parallel for. It only pays off for the big filler-dominated
+  // calls (LUT/FF regions can have hundreds of thousands of ids); skip it for small ranges
+  // such as the movable-only pass in overflow(), where the reduction's own overhead would
+  // dominate.
+  //
+  // This is a hand-rolled reduction rather than `reduction(+:map_ptr[0:cells])` on purpose:
+  // each thread gets its own indexed slot (schedule(static), so the same slot every run given
+  // the same thread count) and the final combine is one plain serial loop over slots
+  // 0..T-1, in that fixed order -- deterministic by construction. The built-in array-section
+  // reduction clause was measured to *not* give that guarantee here: two runs of the identical
+  // config matched to 1 ULP for hundreds of iterations and then diverged, even after pinning
+  // every loop's schedule to schedule(static).
   Real* map_ptr = map.data();
   const std::size_t cells = map.size();
 #ifdef _OPENMP
   if (static_cast<std::size_t>(end - begin) > cells / 4) {
-#pragma omp parallel for reduction(+ : map_ptr[0:cells]) schedule(static)
-    for (int i = begin; i < end; ++i) {
-      accumulate_one(pos, i, n_all, xl, yl, xh, yh, inv_bx, inv_by, target_half_x, target_half_y, map_ptr);
+    const int max_threads = omp_get_max_threads();
+    thread_scratch_.assign(static_cast<std::size_t>(max_threads) * cells, Real(0));
+    Real* scratch = thread_scratch_.data();
+#pragma omp parallel
+    {
+      const int tid = omp_get_thread_num();
+      Real* local = scratch + static_cast<std::size_t>(tid) * cells;
+#pragma omp for schedule(static)
+      for (int i = begin; i < end; ++i) {
+        accumulate_one(pos, i, n_all, xl, yl, xh, yh, inv_bx, inv_by, target_half_x, target_half_y, local);
+      }
+    }
+    for (int t = 0; t < max_threads; ++t) {
+      const Real* local = scratch + static_cast<std::size_t>(t) * cells;
+      for (std::size_t k = 0; k < cells; ++k) map_ptr[k] += local[k];
     }
     return;
   }

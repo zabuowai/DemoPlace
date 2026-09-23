@@ -27,13 +27,14 @@ solution; hand that off to an external legalizer/detailed-placer (the original p
 bundles one, `elfPlace_LG_DP`) for a fully legal placement.
 
 **Known limitations** (see [`docs/ARCHITECTURE.md#known-limitations`](docs/ARCHITECTURE.md#known-limitations)
-for detail): results are not bit-reproducible run-to-run because the OpenMP reductions in
-the hot loops don't fix a summation order (`deterministic_flag` is parsed but not yet
-wired up to a deterministic accumulation path), and the RNG draws don't correspond
-seed-for-seed with the original's PyTorch/NumPy RNGs (different algorithms), so HPWL
-curves diverge from the original after enough iterations even at nominally "the same"
-seed. Early-iteration behavior and the underlying model match the original closely —
-see the architecture doc for the validation evidence.
+for detail): the RNG draws don't correspond seed-for-seed with the original's PyTorch/NumPy
+RNGs (different algorithms — and, as it turns out, the original's `random_seed` doesn't
+actually affect its own result either), so HPWL curves diverge from the original after
+enough iterations even given nominally "the same" seed. Early-iteration behavior and the
+underlying model match the original closely — see the architecture doc for the validation
+evidence. Runs of *this* port are, however, bit-reproducible given the same config
+(`deterministic_flag`, on by default, picks a fixed OpenMP schedule and an explicitly
+thread-ordered reduction instead of the faster but timing-dependent defaults).
 
 ## Requirements
 

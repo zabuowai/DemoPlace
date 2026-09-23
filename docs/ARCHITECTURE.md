@@ -334,39 +334,65 @@ concluded.
 
 ## Known limitations
 
-Two real, distinct gaps were found (and are *not* fixed, by design — see below) while
-validating this port against the original DREAMPlaceFPGA on identical benchmarks and
-configs:
+One real gap was found, root-caused, and fixed; a second was found and is *not*
+fixed, by design — both while validating this port against the original DREAMPlaceFPGA
+on identical benchmarks and configs.
 
-1. **This port's `random_seed` no longer does anything** (as of this repository's
-   current state), matching an actual bug in the original: `BasicPlaceFPGA.__init__`
-   sets `torch.manual_seed(params.random_seed)`, then two lines later unconditionally
-   overwrites both NumPy's and PyTorch's global RNG state with a hardcoded
-   `manualSeed = 0` before any placement randomness is drawn — so the original's GP
-   result is independent of the configured seed too (verified empirically: two configs
-   differing *only* in `random_seed` produced byte-identical logs). This port's own RNG
-   is now likewise seeded with a fixed constant regardless of config, for behavioral
-   parity — see `NonLinearPlacer`'s constructor in `src/global_placer.cpp`.
+### Fixed: run-to-run non-determinism
 
-2. **Runs aren't bit-reproducible even with a fixed seed**, because the OpenMP
-   `reduction(...)` clauses used in the density accumulation and DCT hot loops don't fix
-   a summation order — whichever thread's chunk happens to finish first merges first,
-   and floating-point addition isn't associative. Two runs of the identical config were
-   observed to match to 1 ULP for hundreds of iterations, then diverge completely by
-   iteration ~450 — this is a chaotic nonlinear optimizer, so a single-ULP perturbation
-   eventually amplifies into a qualitatively different trajectory. `Params::deterministic_flag`
-   is parsed but not yet wired to anything; the original threads an analogous flag (and a
-   `sorted_node_map`) through its ops specifically to force a fixed accumulation order,
-   which this port does not yet replicate.
+Two runs of the identical config were observed to match to 1 ULP for hundreds of
+iterations, then diverge completely — a chaotic nonlinear optimizer, so a single-ULP
+perturbation eventually amplifies into a qualitatively different trajectory. The cause
+traced to exactly one spot: `ops::weighted_average_wirelength()`'s per-net reduction
+used `schedule(dynamic, 64)` to balance load across nets of very different pin counts.
+Dynamic scheduling assigns loop chunks to whichever thread is free *at that moment*, so
+which nets land in which thread's partial sum — and therefore the floating-point
+rounding of the sum — depends on OS thread-scheduling timing, not just the input.
+Pinning that loop's schedule to `schedule(static)` (a pure function of iteration count
+and thread count, no timing dependency) narrowed but did not close the gap; the
+remaining source was `RegionDensity::accumulate()`'s `reduction(+:map_ptr[0:cells])`
+array-section reduction, whose per-thread-partial combine order the OpenMP standard
+does not actually guarantee. Replacing it with an explicit combine — each thread
+accumulates into its own indexed scratch slot, then one plain serial loop sums slots
+`0..T-1` in that fixed order — closed the gap completely: two independent runs of the
+same config now produce byte-identical output (verified by hash) apart from wall-clock
+timing lines.
 
-Both of these were root-caused, not just observed: they explain why HPWL comparisons
-against the original vary by seed/run (10,840 to 69,166 across different C++-RNG seeds
-on one benchmark, against the original's single fixed ~10,665-10,872), while the
-*algorithm itself* — every formula for wirelength, density energy/gradient, the
-Nesterov step, the weight/gamma schedules, the legalization trigger — was checked
-line-by-line against the original's Python source and matches. Early-iteration HPWL
-(before chaotic amplification has had time to act) matches the original to 5+
-significant figures on every benchmark tested.
+Both fixes are gated on `Params::deterministic_flag` (on by default, matching the
+original's own default): `place_fpga()` calls `omp_set_schedule()` once per run,
+picking `omp_sched_static` when set and the faster-but-timing-dependent
+`omp_sched_dynamic` otherwise; `accumulate()`'s explicit-combine path always runs (it
+was already using `schedule(static)`, so the remaining risk was the reduction combine
+itself, not the loop schedule). This mirrors the original's own design intent — it
+threads an analogous `deterministic_flag` (and a `sorted_node_map`) through its CUDA
+ops specifically to force a fixed accumulation order — which this port now replicates
+rather than merely parsing and ignoring.
+
+### Not fixed, by design: RNG doesn't correspond seed-for-seed with the original
+
+**This port's `random_seed` doesn't affect anything either**, matching an actual bug
+in the original: `BasicPlaceFPGA.__init__` sets `torch.manual_seed(params.random_seed)`,
+then two lines later unconditionally overwrites both NumPy's and PyTorch's global RNG
+state with a hardcoded `manualSeed = 0` before any placement randomness is drawn — so
+the original's GP result is independent of the configured seed too (verified
+empirically: two configs differing *only* in `random_seed` produced byte-identical
+logs). This port's own RNG is now likewise seeded with a fixed constant regardless of
+config, for behavioral parity — see `NonLinearPlacer`'s constructor in
+`src/global_placer.cpp`. Since `std::mt19937_64` and NumPy/PyTorch's RNGs are different
+algorithms, "seeded the same way" still doesn't mean "the same draws," so this is not
+something a code change on either side can close — matching the original's own fixed
+trajectory would mean reimplementing its specific RNGs bit-for-bit, not fixing a bug.
+
+This explains why HPWL comparisons against the original vary by C++-RNG seed (10,840 to
+69,166 across different seeds on one benchmark, against the original's single fixed
+~10,665–10,872), while the *algorithm itself* — every formula for wirelength, density
+energy/gradient, the Nesterov step, the weight/gamma schedules, the legalization
+trigger, and (checked in a follow-up pass) every routability-optimization formula
+(RUDY, pin utilization, LUT/FF clustering compatibility, area adjustment and its
+capacity-scaling/stop-ratio logic) — was checked line-by-line against the original's
+Python/C++ source and matches exactly. Early-iteration HPWL (before chaotic
+amplification has had time to act) matches the original to 5+ significant figures on
+every benchmark tested.
 
 ## References
 
